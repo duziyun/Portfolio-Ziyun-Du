@@ -1,0 +1,562 @@
+options
+{
+  IGNORE_CASE = true;
+  STATIC = false;
+  DEBUG_PARSER=true;
+}
+
+PARSER_BEGIN(MyRelation)
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.Collections;
+import java.util.Scanner;
+import java.util.Set;
+import java.util.ArrayList;
+public class MyRelation
+{
+  public static Relation getparseresult(String args,HashMap<String,Relation> relations) throws Exception
+  {
+    MyRelation parse = new MyRelation(new java.io.StringReader(args));
+    Relation r = parse.Query(relations);
+    return r;
+  }
+ }
+
+PARSER_END(MyRelation)
+
+SKIP :
+{
+  " "
+| "\t"
+| "\r"
+| "\n"
+}
+
+TOKEN :
+{
+< AND : "AND" >
+| < SIGMA : "\u03c3" >
+| < PI : "\u03c0" >
+| < JOIN : 	"\u2a1d" >
+| < CARTPROD : "\u2a2f" >
+| < FUNCTION : "\u2131" >
+| < INTERSECTION : "\u2229" >
+| < UNION : "\u222a" >
+| < MINUS : "\u2212" >
+| < DIVIDE : "\u00f7" >
+| < Y : "\u03b3" >
+| < RENAME : "Set" >
+}
+
+TOKEN :
+{
+  < OPEN_PAR : "(" >
+}
+
+TOKEN :
+{
+  < CLOSE_PAR : ")" >
+}
+
+TOKEN :
+{
+  < DOT : "." >
+}
+
+TOKEN :
+{
+  < COMMA : "," >
+}
+
+
+TOKEN :
+{
+  < QUO : "\""|"\'" >
+}
+
+
+TOKEN :
+{
+  < OPERATOR :
+    ">"
+  | "<"
+  | "="
+  | ">="
+  | "<="
+  | "!=" >
+}
+
+
+TOKEN :
+{
+  < DIGITS : ([ "0"-"9" ])+ >
+}
+
+TOKEN :
+{
+  < NAME : ([ "a"-"z", "0"-"9","*","_","-" ])+ >
+}
+
+Relation Query(HashMap<String,Relation> relations) :
+{
+  Relation query= null;
+  Relation set=null;
+}
+{
+  set=SetClause(relations)
+  (
+    query = Query(relations)
+  )*< EOF >
+   {
+     return Relation.rename(set,query);
+   }
+  |
+	query=SuperRelation(relations)< EOF >
+  {
+    return query;
+  }
+}
+
+Relation SetClause(HashMap<String,Relation> relations):
+{
+  ArrayList<String> rename=new ArrayList<String>();
+  Relation exp = null;
+  Relation stored = null;
+}
+{
+  rename=RenameClause() exp=SuperRelation(relations)
+{
+  stored=Relation.storeOneRelation(relations,exp,rename);
+}
+{
+  return stored;
+}
+}
+
+Relation SuperRelation(HashMap<String,Relation> relations) :
+{
+  Relation exp1 = null;
+  Relation exp2 = null;
+  ArrayList<ArrayList<ArrayList<String>>> select = new ArrayList<ArrayList<ArrayList<String>>>();
+  ArrayList<ArrayList<ArrayList<String>>> join=new ArrayList<ArrayList<ArrayList<String>>>();
+  ArrayList<ArrayList< String>> proj=new ArrayList<ArrayList< String>>();
+  ArrayList<String> groupby=new ArrayList<String>();
+  ArrayList<ArrayList< String>> functions=new ArrayList<ArrayList< String>>();
+  Relation temp=null;
+}
+{
+  LOOKAHEAD(3)
+< OPEN_PAR > exp1 = SuperRelation(relations) < CLOSE_PAR >
+  (
+    join=JoinCardiClause() exp2 = SuperRelation(relations)
+  )*
+    {
+     return Relation.joinclause(exp1,exp2,join);
+    }
+  |LOOKAHEAD(3)
+  exp1 = BasicRelationExpression(relations)
+  (
+     join=JoinCardiClause() exp2 = SuperRelation(relations)
+  )*
+  {
+     return Relation.joinclause(exp1,exp2,join);
+    }
+  |LOOKAHEAD(3)
+  select = SelectClause()< OPEN_PAR > exp1=SuperRelation(relations)< CLOSE_PAR >
+  (
+     join=JoinCardiClause() exp2 = SuperRelation(relations)
+  )*
+  {
+    temp=Relation.selectmethod(select,exp1);
+  }
+  {
+   return Relation.joinclause(temp,exp2,join);
+  }
+  |LOOKAHEAD(3)
+  proj = ProjectClause() < OPEN_PAR > exp1=SuperRelation(relations)< CLOSE_PAR >
+  (
+     join=JoinCardiClause() exp2 = SuperRelation(relations)
+  )*
+  {
+    temp=Relation.project(proj,exp1);
+  }
+  {
+   return Relation.joinclause(temp,exp2,join);
+  }
+  |LOOKAHEAD(3)
+  groupby=GroupbyClause() functions=FunctionClause()< OPEN_PAR > exp1=SuperRelation(relations)< CLOSE_PAR >
+  (
+     join=JoinCardiClause() exp2 = SuperRelation(relations)
+  )*
+  {
+    temp=Relation.groupby(groupby,functions,exp1);
+  }
+  {
+   return Relation.joinclause(temp,exp2,join);
+  }
+}
+
+ArrayList<String> GroupbyClause():
+{
+  ArrayList<String>attrilist=new ArrayList<String>();
+}
+{LOOKAHEAD(3)
+< Y ><OPEN_PAR >< CLOSE_PAR >
+  {
+   return attrilist;
+  }
+|
+< Y ><OPEN_PAR >attrilist = ListofAttr(attrilist)< CLOSE_PAR >
+  {
+    return attrilist;
+  }
+}
+
+ArrayList<ArrayList< String>> FunctionClause():
+{
+  ArrayList<ArrayList< String>> functions=new ArrayList<ArrayList< String>>();
+}
+{
+  < FUNCTION ><OPEN_PAR > functions=AllFunctions(functions)<CLOSE_PAR >
+  {
+    return functions;
+  }
+}
+
+ArrayList<ArrayList< String>> AllFunctions(ArrayList<ArrayList< String>> list):
+{
+  ArrayList< String> onefunction= new ArrayList< String>();
+  ArrayList<ArrayList< String>> list2= new ArrayList<ArrayList< String>>();
+  Token functionname;
+  Token attri;
+}
+{
+  functionname=< NAME > <OPEN_PAR > attri=< NAME ><CLOSE_PAR >
+  (
+    < COMMA > list2 = AllFunctions(list)
+  )*
+  {
+    onefunction.add(functionname.image);
+    onefunction.add(attri.image);
+    list.add(onefunction);
+  }
+  {
+    return list;
+  }
+    
+}
+
+ArrayList<String> RenameClause():
+{
+  ArrayList<String> attrilist=new ArrayList<String>();
+  Token name;
+  
+}
+{ LOOKAHEAD(3)
+  < RENAME > name=< NAME> <OPERATOR >
+  {
+    attrilist.add(name.image);
+  }
+  {
+    return attrilist;
+  }
+| LOOKAHEAD(3)
+  < RENAME > name=< NAME>< OPEN_PAR >attrilist = ListofAttr(attrilist)< CLOSE_PAR ><OPERATOR >
+  {
+    Collections.reverse(attrilist);
+    attrilist.add(name.image);
+  }
+  {
+    return attrilist;
+  }
+}
+ArrayList<ArrayList<String>> ProjectClause() :
+{
+  ArrayList<ArrayList<String>> project=new ArrayList<ArrayList<String>>();
+  ArrayList<ArrayList<String>> list=new ArrayList<ArrayList<String>>();
+}
+{
+  < PI > < OPEN_PAR > project = ProjAttr(list) < CLOSE_PAR >
+  { 
+    return project;
+  }
+}
+
+ArrayList<ArrayList<String>> ProjAttr(ArrayList<ArrayList<String>> list) :
+{
+  Token rel;
+  Token attr;
+  ArrayList<String> element=new ArrayList<String>();
+  ArrayList<ArrayList<String>> list2=new ArrayList<ArrayList<String>>();
+}
+{
+LOOKAHEAD(2)
+rel = < NAME > < DOT > attr = < NAME >
+(
+    < COMMA > list2 = ProjAttr(list)
+  )*
+  {
+    element.add(rel.image);
+    element.add(attr.image);
+    list.add(element);
+  }
+  {
+    return list;
+  }
+
+| 
+
+  attr = < NAME >
+  
+  (
+    < COMMA > list2 = ProjAttr(list)
+  )*
+  {
+    element.add(attr.image);
+    list.add(element);
+   }
+  {
+    return list;
+  }
+}
+
+ArrayList<String> ListofAttr(ArrayList<String> list) :
+{
+  Token attr;
+  ArrayList<String> list2=new ArrayList<String>();
+}
+{
+  attr = < NAME >
+  
+  (
+    < COMMA > list2 = ListofAttr(list)
+  )*
+  {
+    list.add(attr.image);
+   }
+  {
+    return list;
+  }
+}
+
+ArrayList<ArrayList<ArrayList<String>>> SelectClause() :
+{
+  ArrayList<ArrayList<ArrayList<String>>> allcondilist=new ArrayList<ArrayList<ArrayList<String>>>();
+}
+{
+  < SIGMA > < OPEN_PAR > allcondilist = Expressionforjoin(allcondilist) < CLOSE_PAR >
+  { 
+    return allcondilist;
+  }
+}
+
+ArrayList<String> Operator() :
+{
+  Token operator;
+  ArrayList<String> list=new ArrayList<String>();
+  String s1="operator";
+}
+{
+  operator = < OPERATOR >
+  {
+    list.add(s1);
+    list.add(operator.image);   
+  }
+  {
+    return list;
+  }
+}
+
+ArrayList<ArrayList<ArrayList<String>>> JoinCardiClause() :
+{
+  ArrayList<ArrayList<ArrayList<String>>> allcondilist=new ArrayList<ArrayList<ArrayList<String>>>();
+  ArrayList<ArrayList<String>> templist2=new ArrayList<ArrayList<String>>();
+  ArrayList<String> templist1=new ArrayList<String>();
+  String s;
+}
+{  
+  < CARTPROD >
+  {
+    return allcondilist;
+  }  
+| < UNION >
+{
+  s="union";
+  templist1.add(s);
+  templist2.add(templist1);
+  allcondilist.add(templist2);
+ }
+ {
+  return allcondilist;
+ }
+| < INTERSECTION >
+{
+  s="intersection";
+  templist1.add(s);
+  templist2.add(templist1);
+  allcondilist.add(templist2);
+ }
+ {
+  return allcondilist;
+ }
+| < MINUS >
+{
+  s="minus";
+  templist1.add(s);
+  templist2.add(templist1);
+  allcondilist.add(templist2);
+ }
+ {
+  return allcondilist;
+ }
+| < DIVIDE >
+{
+  s="divide";
+  templist1.add(s);
+  templist2.add(templist1);
+  allcondilist.add(templist2);
+ }
+ {
+  return allcondilist;
+ }
+| < JOIN > < OPEN_PAR >allcondilist=Expressionforjoin(allcondilist)< CLOSE_PAR >
+  {
+    return allcondilist;
+  }
+}
+
+ArrayList<ArrayList<ArrayList<String>>> Expressionforjoin(ArrayList<ArrayList<ArrayList<String>>> allcondilist) :
+{
+  ArrayList<ArrayList<String>> condilist1= new ArrayList<ArrayList<String>>();
+  ArrayList<ArrayList<ArrayList<String>>> condilist2= new ArrayList<ArrayList<ArrayList<String>>>();
+}
+{
+  condilist1 = Conditionforjoin()
+  (
+    < AND > condilist2=Expressionforjoin(allcondilist)
+  )*
+  {
+      allcondilist.add(condilist1);
+  }
+  {
+    return allcondilist;
+  }
+}
+
+ArrayList<ArrayList<String>> Conditionforjoin() :
+{
+  ArrayList<ArrayList<String>> conditionlist = new ArrayList<ArrayList<String>>();
+  ArrayList<String> left = new ArrayList<String>();
+  ArrayList<String> right = new ArrayList<String>();
+  ArrayList<String> operator=new ArrayList<String>();
+}
+{
+  left = Elementforjoin()
+  operator = Operator()
+  right = Elementforjoin()
+  {
+    conditionlist.add(left);
+    conditionlist.add(operator);
+    conditionlist.add(right);
+  }
+  {
+    return conditionlist;
+  }
+}
+
+ArrayList<String> Elementforjoin() :
+{
+  Token rel;
+  Token attr;
+  ArrayList<String> list=new ArrayList<String>();
+  String s1="";
+  String s2="";
+}
+{
+  rel = < DIGITS >
+  {
+   s1="number";
+ }
+  {
+    list.add(s1);
+    list.add(rel.image);
+  { 
+  return list;
+  }
+  }
+|  LOOKAHEAD(2)
+rel = < NAME > < DOT > attr = < NAME >
+ {
+   s1="relationname";
+   s2="attributename";
+  }
+  {
+    list.add(s1);
+    list.add(rel.image);
+    list.add(s2);
+    list.add(attr.image);
+  }
+  {
+    return list;
+  }
+| < QUO > rel = < NAME > < QUO >
+  {
+    s1="string";
+  }
+  {
+    
+    list.add(s1);
+    list.add(rel.image);
+  }
+  {
+    return list;
+  }
+| 
+rel = < NAME >
+  {
+    s1="attributename";
+ }
+ {
+   
+    list.add(s1);
+    list.add(rel.image);
+  }
+  {
+    return list;
+  }
+}
+
+
+Relation BasicRelationExpression(HashMap<String,Relation> relations):
+{
+  Token relationName;
+  Relation thisRelation = null;
+  Relation followRelation = null;
+  ArrayList<ArrayList<ArrayList<String>>> allcondilist=new ArrayList<ArrayList<ArrayList<String>>>();
+  
+}
+{
+  relationName = < NAME > 
+ /*
+ (
+    allcondilist=JoinCardiClause() followRelation =BasicRelationExpression(relations)
+  )*
+  {
+    thisRelation=Relation.getrelationbyname(relations,relationName.image);
+  }
+  {
+   return Relation.joinclause(thisRelation,followRelation,allcondilist);
+  }
+  */
+  {
+    thisRelation=Relation.getrelationbyname(relations,relationName.image);
+  }
+  {
+    return thisRelation;
+  }
+    
+}
